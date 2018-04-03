@@ -231,7 +231,6 @@ int btrfs_alloc_stripe_hash_table(struct btrfs_fs_info *info)
 		cur = h + i;
 		INIT_LIST_HEAD(&cur->hash_list);
 		spin_lock_init(&cur->lock);
-		init_waitqueue_head(&cur->wait);
 	}
 
 	x = cmpxchg(&info->stripe_hash_table, NULL, table);
@@ -595,14 +594,31 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
 	 * bio list here, anyone else that wants to
 	 * change this stripe needs to do their own rmw.
 	 */
-	if (last->operation == BTRFS_RBIO_PARITY_SCRUB ||
-	    cur->operation == BTRFS_RBIO_PARITY_SCRUB)
+	if (last->operation == BTRFS_RBIO_PARITY_SCRUB)
 		return 0;
 
-	if (last->operation == BTRFS_RBIO_REBUILD_MISSING ||
-	    cur->operation == BTRFS_RBIO_REBUILD_MISSING)
+	if (last->operation == BTRFS_RBIO_REBUILD_MISSING)
 		return 0;
 
+	if (last->operation == BTRFS_RBIO_READ_REBUILD) {
+		int fa = last->faila;
+		int fb = last->failb;
+		int cur_fa = cur->faila;
+		int cur_fb = cur->failb;
+
+		if (last->faila >= last->failb) {
+			fa = last->failb;
+			fb = last->faila;
+		}
+
+		if (cur->faila >= cur->failb) {
+			cur_fa = cur->failb;
+			cur_fb = cur->faila;
+		}
+
+		if (fa != cur_fa || fb != cur_fb)
+			return 0;
+	}
 	return 1;
 }
 
@@ -670,7 +686,6 @@ static noinline int lock_stripe_add(struct btrfs_raid_bio *rbio)
 	struct btrfs_raid_bio *cur;
 	struct btrfs_raid_bio *pending;
 	unsigned long flags;
-	DEFINE_WAIT(wait);
 	struct btrfs_raid_bio *freeit = NULL;
 	struct btrfs_raid_bio *cache_drop = NULL;
 	int ret = 0;
@@ -816,15 +831,6 @@ static noinline void unlock_stripe(struct btrfs_raid_bio *rbio)
 			}
 
 			goto done_nolock;
-			/*
-			 * The barrier for this waitqueue_active is not needed,
-			 * we're protected by h->lock and can't miss a wakeup.
-			 */
-		} else if (waitqueue_active(&h->wait)) {
-			spin_unlock(&rbio->bio_list_lock);
-			spin_unlock_irqrestore(&h->lock, flags);
-			wake_up(&h->wait);
-			goto done_nolock;
 		}
 	}
 done:
@@ -858,10 +864,17 @@ static void __free_raid_bio(struct btrfs_raid_bio *rbio)
 	kfree(rbio);
 }
 
-static void free_raid_bio(struct btrfs_raid_bio *rbio)
+static void rbio_endio_bio_list(struct bio *cur, blk_status_t err)
 {
-	unlock_stripe(rbio);
-	__free_raid_bio(rbio);
+	struct bio *next;
+
+	while (cur) {
+		next = cur->bi_next;
+		cur->bi_next = NULL;
+		cur->bi_status = err;
+		bio_endio(cur);
+		cur = next;
+	}
 }
 
 /*
@@ -871,20 +884,26 @@ static void free_raid_bio(struct btrfs_raid_bio *rbio)
 static void rbio_orig_end_io(struct btrfs_raid_bio *rbio, blk_status_t err)
 {
 	struct bio *cur = bio_list_get(&rbio->bio_list);
-	struct bio *next;
+	struct bio *extra;
 
 	if (rbio->generic_bio_cnt)
 		btrfs_bio_counter_sub(rbio->fs_info, rbio->generic_bio_cnt);
 
-	free_raid_bio(rbio);
+	/*
+	 * At this moment, rbio->bio_list is empty, however since rbio does not
+	 * always have RBIO_RMW_LOCKED_BIT set and rbio is still linked on the
+	 * hash list, rbio may be merged with others so that rbio->bio_list
+	 * becomes non-empty.
+	 * Once unlock_stripe() is done, rbio->bio_list will not be updated any
+	 * more and we can call bio_endio() on all queued bios.
+	 */
+	unlock_stripe(rbio);
+	extra = bio_list_get(&rbio->bio_list);
+	__free_raid_bio(rbio);
 
-	while (cur) {
-		next = cur->bi_next;
-		cur->bi_next = NULL;
-		cur->bi_status = err;
-		bio_endio(cur);
-		cur = next;
-	}
+	rbio_endio_bio_list(cur, err);
+	if (extra)
+		rbio_endio_bio_list(extra, err);
 }
 
 /*
@@ -905,7 +924,7 @@ static void raid_write_end_io(struct bio *bio)
 	if (!atomic_dec_and_test(&rbio->stripes_pending))
 		return;
 
-	err = 0;
+	err = BLK_STS_OK;
 
 	/* OK, we have read all the stripes we need to. */
 	max_errors = (rbio->operation == BTRFS_RBIO_PARITY_SCRUB) ?
@@ -1090,7 +1109,8 @@ static int rbio_add_io_page(struct btrfs_raid_bio *rbio,
 		 */
 		if (last_end == disk_start && stripe->dev->bdev &&
 		    !last->bi_status &&
-		    last->bi_bdev == stripe->dev->bdev) {
+		    last->bi_disk == stripe->dev->bdev->bd_disk &&
+		    last->bi_partno == stripe->dev->bdev->bd_partno) {
 			ret = bio_add_page(last, page, PAGE_SIZE, 0);
 			if (ret == PAGE_SIZE)
 				return 0;
@@ -1100,7 +1120,7 @@ static int rbio_add_io_page(struct btrfs_raid_bio *rbio,
 	/* put a new bio on the list */
 	bio = btrfs_io_bio_alloc(bio_max_len >> PAGE_SHIFT ?: 1);
 	bio->bi_iter.bi_size = 0;
-	bio->bi_bdev = stripe->dev->bdev;
+	bio_set_dev(bio, stripe->dev->bdev);
 	bio->bi_iter.bi_sector = disk_start >> 9;
 
 	bio_add_page(bio, page, PAGE_SIZE, 0);
@@ -1136,20 +1156,27 @@ static void validate_rbio_for_rmw(struct btrfs_raid_bio *rbio)
 static void index_rbio_pages(struct btrfs_raid_bio *rbio)
 {
 	struct bio *bio;
-	struct bio_vec *bvec;
 	u64 start;
 	unsigned long stripe_offset;
 	unsigned long page_index;
-	int i;
 
 	spin_lock_irq(&rbio->bio_list_lock);
 	bio_list_for_each(bio, &rbio->bio_list) {
+		struct bio_vec bvec;
+		struct bvec_iter iter;
+		int i = 0;
+
 		start = (u64)bio->bi_iter.bi_sector << 9;
 		stripe_offset = start - rbio->bbio->raid_map[0];
 		page_index = stripe_offset >> PAGE_SHIFT;
 
-		bio_for_each_segment_all(bvec, bio, i)
-			rbio->bio_pages[page_index + i] = bvec->bv_page;
+		if (bio_flagged(bio, BIO_CLONED))
+			bio->bi_iter = btrfs_io_bio(bio)->iter;
+
+		bio_for_each_segment(bvec, bio, iter) {
+			rbio->bio_pages[page_index + i] = bvec.bv_page;
+			i++;
+		}
 	}
 	spin_unlock_irq(&rbio->bio_list_lock);
 }
@@ -1317,7 +1344,10 @@ write_data:
 	return;
 
 cleanup:
-	rbio_orig_end_io(rbio, -EIO);
+	rbio_orig_end_io(rbio, BLK_STS_IOERR);
+
+	while ((bio = bio_list_pop(&bio_list)))
+		bio_put(bio);
 }
 
 /*
@@ -1340,7 +1370,9 @@ static int find_bio_stripe(struct btrfs_raid_bio *rbio,
 		stripe_start = stripe->physical;
 		if (physical >= stripe_start &&
 		    physical < stripe_start + rbio->stripe_len &&
-		    bio->bi_bdev == stripe->dev->bdev) {
+		    stripe->dev->bdev &&
+		    bio->bi_disk == stripe->dev->bdev->bd_disk &&
+		    bio->bi_partno == stripe->dev->bdev->bd_partno) {
 			return i;
 		}
 	}
@@ -1426,6 +1458,8 @@ static void set_bio_pages_uptodate(struct bio *bio)
 	struct bio_vec *bvec;
 	int i;
 
+	ASSERT(!bio_flagged(bio, BIO_CLONED));
+
 	bio_for_each_segment_all(bvec, bio, i)
 		SetPageUptodate(bvec->bv_page);
 }
@@ -1465,7 +1499,7 @@ static void raid_rmw_end_io(struct bio *bio)
 
 cleanup:
 
-	rbio_orig_end_io(rbio, -EIO);
+	rbio_orig_end_io(rbio, BLK_STS_IOERR);
 }
 
 static void async_rmw_stripe(struct btrfs_raid_bio *rbio)
@@ -1569,7 +1603,11 @@ static int raid56_rmw_stripe(struct btrfs_raid_bio *rbio)
 	return 0;
 
 cleanup:
-	rbio_orig_end_io(rbio, -EIO);
+	rbio_orig_end_io(rbio, BLK_STS_IOERR);
+
+	while ((bio = bio_list_pop(&bio_list)))
+		bio_put(bio);
+
 	return -EIO;
 
 finish:
@@ -1785,12 +1823,12 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
 	void **pointers;
 	int faila = -1, failb = -1;
 	struct page *page;
-	int err;
+	blk_status_t err;
 	int i;
 
 	pointers = kcalloc(rbio->real_stripes, sizeof(void *), GFP_NOFS);
 	if (!pointers) {
-		err = -ENOMEM;
+		err = BLK_STS_RESOURCE;
 		goto cleanup_io;
 	}
 
@@ -1846,7 +1884,7 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
 					 * a bad data or Q stripe.
 					 * TODO, we should redo the xor here.
 					 */
-					err = -EIO;
+					err = BLK_STS_IOERR;
 					goto cleanup;
 				}
 				/*
@@ -1872,7 +1910,7 @@ static void __raid_recover_end_io(struct btrfs_raid_bio *rbio)
 			if (rbio->bbio->raid_map[failb] == RAID6_Q_STRIPE) {
 				if (rbio->bbio->raid_map[faila] ==
 				    RAID5_P_STRIPE) {
-					err = -EIO;
+					err = BLK_STS_IOERR;
 					goto cleanup;
 				}
 				/*
@@ -1944,13 +1982,28 @@ pstripe:
 		}
 	}
 
-	err = 0;
+	err = BLK_STS_OK;
 cleanup:
 	kfree(pointers);
 
 cleanup_io:
 	if (rbio->operation == BTRFS_RBIO_READ_REBUILD) {
-		if (err == 0)
+		/*
+		 * - In case of two failures, where rbio->failb != -1:
+		 *
+		 *   Do not cache this rbio since the above read reconstruction
+		 *   (raid6_datap_recov() or raid6_2data_recov()) may have
+		 *   changed some content of stripes which are not identical to
+		 *   on-disk content any more, otherwise, a later write/recover
+		 *   may steal stripe_pages from this rbio and end up with
+		 *   corruptions or rebuild failures.
+		 *
+		 * - In case of single failure, where rbio->failb == -1:
+		 *
+		 *   Cache this rbio iff the above read reconstruction is
+		 *   excuted without problems.
+		 */
+		if (err == BLK_STS_OK && rbio->failb < 0)
 			cache_rbio_pages(rbio);
 		else
 			clear_bit(RBIO_CACHE_READY_BIT, &rbio->flags);
@@ -1958,7 +2011,7 @@ cleanup_io:
 		rbio_orig_end_io(rbio, err);
 	} else if (rbio->operation == BTRFS_RBIO_REBUILD_MISSING) {
 		rbio_orig_end_io(rbio, err);
-	} else if (err == 0) {
+	} else if (err == BLK_STS_OK) {
 		rbio->faila = -1;
 		rbio->failb = -1;
 
@@ -1995,7 +2048,7 @@ static void raid_recover_end_io(struct bio *bio)
 		return;
 
 	if (atomic_read(&rbio->error) > rbio->bbio->max_errors)
-		rbio_orig_end_io(rbio, -EIO);
+		rbio_orig_end_io(rbio, BLK_STS_IOERR);
 	else
 		__raid_recover_end_io(rbio);
 }
@@ -2094,7 +2147,11 @@ out:
 cleanup:
 	if (rbio->operation == BTRFS_RBIO_READ_REBUILD ||
 	    rbio->operation == BTRFS_RBIO_REBUILD_MISSING)
-		rbio_orig_end_io(rbio, -EIO);
+		rbio_orig_end_io(rbio, BLK_STS_IOERR);
+
+	while ((bio = bio_list_pop(&bio_list)))
+		bio_put(bio);
+
 	return -EIO;
 }
 
@@ -2147,11 +2204,21 @@ int raid56_parity_recover(struct btrfs_fs_info *fs_info, struct bio *bio,
 	}
 
 	/*
-	 * reconstruct from the q stripe if they are
-	 * asking for mirror 3
+	 * Loop retry:
+	 * for 'mirror == 2', reconstruct from all other stripes.
+	 * for 'mirror_num > 2', select a stripe to fail on every retry.
 	 */
-	if (mirror_num == 3)
-		rbio->failb = rbio->real_stripes - 2;
+	if (mirror_num > 2) {
+		/*
+		 * 'mirror == 3' is to fail the p stripe and
+		 * reconstruct from the q stripe.  'mirror > 3' is to
+		 * fail a data stripe and reconstruct from p+q stripe.
+		 */
+		rbio->failb = rbio->real_stripes - (mirror_num - 1);
+		ASSERT(rbio->failb > 0);
+		if (rbio->failb <= rbio->faila)
+			rbio->failb--;
+	}
 
 	ret = lock_stripe_add(rbio);
 
@@ -2219,12 +2286,18 @@ raid56_parity_alloc_scrub_rbio(struct btrfs_fs_info *fs_info, struct bio *bio,
 	ASSERT(!bio->bi_iter.bi_size);
 	rbio->operation = BTRFS_RBIO_PARITY_SCRUB;
 
-	for (i = 0; i < rbio->real_stripes; i++) {
+	/*
+	 * After mapping bbio with BTRFS_MAP_WRITE, parities have been sorted
+	 * to the end position, so this search can start from the first parity
+	 * stripe.
+	 */
+	for (i = rbio->nr_data; i < rbio->real_stripes; i++) {
 		if (bbio->stripes[i].dev == scrub_dev) {
 			rbio->scrubp = i;
 			break;
 		}
 	}
+	ASSERT(i < rbio->real_stripes);
 
 	/* Now we just support the sectorsize equals to page size */
 	ASSERT(fs_info->sectorsize == PAGE_SIZE);
@@ -2421,7 +2494,7 @@ submit_write:
 	nr_data = bio_list_size(&bio_list);
 	if (!nr_data) {
 		/* Every parity is right */
-		rbio_orig_end_io(rbio, 0);
+		rbio_orig_end_io(rbio, BLK_STS_OK);
 		return;
 	}
 
@@ -2441,7 +2514,10 @@ submit_write:
 	return;
 
 cleanup:
-	rbio_orig_end_io(rbio, -EIO);
+	rbio_orig_end_io(rbio, BLK_STS_IOERR);
+
+	while ((bio = bio_list_pop(&bio_list)))
+		bio_put(bio);
 }
 
 static inline int is_data_stripe(struct btrfs_raid_bio *rbio, int stripe)
@@ -2509,7 +2585,7 @@ static void validate_rbio_for_parity_scrub(struct btrfs_raid_bio *rbio)
 	return;
 
 cleanup:
-	rbio_orig_end_io(rbio, -EIO);
+	rbio_orig_end_io(rbio, BLK_STS_IOERR);
 }
 
 /*
@@ -2551,11 +2627,11 @@ static void raid56_parity_scrub_stripe(struct btrfs_raid_bio *rbio)
 	int stripe;
 	struct bio *bio;
 
+	bio_list_init(&bio_list);
+
 	ret = alloc_rbio_essential_pages(rbio);
 	if (ret)
 		goto cleanup;
-
-	bio_list_init(&bio_list);
 
 	atomic_set(&rbio->error, 0);
 	/*
@@ -2623,7 +2699,11 @@ static void raid56_parity_scrub_stripe(struct btrfs_raid_bio *rbio)
 	return;
 
 cleanup:
-	rbio_orig_end_io(rbio, -EIO);
+	rbio_orig_end_io(rbio, BLK_STS_IOERR);
+
+	while ((bio = bio_list_pop(&bio_list)))
+		bio_put(bio);
+
 	return;
 
 finish:

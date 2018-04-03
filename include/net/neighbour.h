@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NET_NEIGHBOUR_H
 #define _NET_NEIGHBOUR_H
 
@@ -156,7 +157,7 @@ struct neighbour {
 	struct rcu_head		rcu;
 	struct net_device	*dev;
 	u8			primary_key[0];
-};
+} __randomize_layout;
 
 struct neigh_ops {
 	int			family;
@@ -190,8 +191,8 @@ struct neigh_hash_table {
 
 struct neigh_table {
 	int			family;
-	int			entry_size;
-	int			key_len;
+	unsigned int		entry_size;
+	unsigned int		key_len;
 	__be16			protocol;
 	__u32			(*hash)(const void *pkey,
 					const struct net_device *dev,

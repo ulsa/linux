@@ -381,7 +381,7 @@ struct atom_rom_hw_function_header
 struct atom_master_list_of_data_tables_v2_1{
   uint16_t utilitypipeline;               /* Offest for the utility to get parser info,Don't change this position!*/
   uint16_t multimedia_info;               
-  uint16_t sw_datatable2;
+  uint16_t smc_dpm_info;
   uint16_t sw_datatable3;                 
   uint16_t firmwareinfo;                  /* Shared by various SW components */
   uint16_t sw_datatable5;
@@ -1017,6 +1017,19 @@ struct atom_14nm_combphy_tmds_vs_set
   uint8_t margin_deemph_lane0__deemph_sel_val;         
 };
 
+struct atom_i2c_reg_info {
+  uint8_t ucI2cRegIndex;
+  uint8_t ucI2cRegVal;
+};
+
+struct atom_hdmi_retimer_redriver_set {
+  uint8_t HdmiSlvAddr;
+  uint8_t HdmiRegNum;
+  uint8_t Hdmi6GRegNum;
+  struct atom_i2c_reg_info HdmiRegSetting[9];        //For non 6G Hz use
+  struct atom_i2c_reg_info Hdmi6GhzRegSetting[3];    //For 6G Hz use.
+};
+
 struct atom_integrated_system_info_v1_11
 {
   struct  atom_common_table_header  table_header;
@@ -1052,7 +1065,11 @@ struct atom_integrated_system_info_v1_11
   struct atom_14nm_dpphy_dp_tuningset dp_tuningset;
   struct atom_14nm_dpphy_dp_tuningset dp_hbr3_tuningset;
   struct atom_camera_data  camera_info;
-  uint32_t  reserved[138];
+  struct atom_hdmi_retimer_redriver_set dp0_retimer_set;   //for DP0
+  struct atom_hdmi_retimer_redriver_set dp1_retimer_set;   //for DP1
+  struct atom_hdmi_retimer_redriver_set dp2_retimer_set;   //for DP2
+  struct atom_hdmi_retimer_redriver_set dp3_retimer_set;   //for DP3
+  uint32_t  reserved[108];
 };
 
 
@@ -1181,6 +1198,86 @@ struct atom_smu_info_v3_1
   uint8_t  fw_ctf_polarity;         // GPIO polarity for CTF
 };
 
+/*
+ ***************************************************************************
+   Data Table smc_dpm_info  structure
+ ***************************************************************************
+ */
+struct atom_smc_dpm_info_v4_1
+{
+  struct   atom_common_table_header  table_header;
+  uint8_t  liquid1_i2c_address;
+  uint8_t  liquid2_i2c_address;
+  uint8_t  vr_i2c_address;
+  uint8_t  plx_i2c_address;
+
+  uint8_t  liquid_i2c_linescl;
+  uint8_t  liquid_i2c_linesda;
+  uint8_t  vr_i2c_linescl;
+  uint8_t  vr_i2c_linesda;
+
+  uint8_t  plx_i2c_linescl;
+  uint8_t  plx_i2c_linesda;
+  uint8_t  vrsensorpresent;
+  uint8_t  liquidsensorpresent;
+
+  uint16_t maxvoltagestepgfx;
+  uint16_t maxvoltagestepsoc;
+
+  uint8_t  vddgfxvrmapping;
+  uint8_t  vddsocvrmapping;
+  uint8_t  vddmem0vrmapping;
+  uint8_t  vddmem1vrmapping;
+
+  uint8_t  gfxulvphasesheddingmask;
+  uint8_t  soculvphasesheddingmask;
+  uint8_t  padding8_v[2];
+
+  uint16_t gfxmaxcurrent;
+  uint8_t  gfxoffset;
+  uint8_t  padding_telemetrygfx;
+
+  uint16_t socmaxcurrent;
+  uint8_t  socoffset;
+  uint8_t  padding_telemetrysoc;
+
+  uint16_t mem0maxcurrent;
+  uint8_t  mem0offset;
+  uint8_t  padding_telemetrymem0;
+
+  uint16_t mem1maxcurrent;
+  uint8_t  mem1offset;
+  uint8_t  padding_telemetrymem1;
+
+  uint8_t  acdcgpio;
+  uint8_t  acdcpolarity;
+  uint8_t  vr0hotgpio;
+  uint8_t  vr0hotpolarity;
+
+  uint8_t  vr1hotgpio;
+  uint8_t  vr1hotpolarity;
+  uint8_t  padding1;
+  uint8_t  padding2;
+
+  uint8_t  ledpin0;
+  uint8_t  ledpin1;
+  uint8_t  ledpin2;
+  uint8_t  padding8_4;
+
+  uint8_t  gfxclkspreadenabled;
+  uint8_t  gfxclkspreadpercent;
+  uint16_t gfxclkspreadfreq;
+
+  uint8_t uclkspreadenabled;
+  uint8_t uclkspreadpercent;
+  uint16_t uclkspreadfreq;
+
+  uint8_t socclkspreadenabled;
+  uint8_t socclkspreadpercent;
+  uint16_t socclkspreadfreq;
+
+  uint32_t boardreserved[3];
+};
 
 
 /* 
@@ -1233,6 +1330,69 @@ struct  atom_asic_profiling_info_v4_1
   uint32_t  phyclk2gfxclk_c;
 };
 
+struct  atom_asic_profiling_info_v4_2 {
+	struct  atom_common_table_header  table_header;
+	uint32_t  maxvddc;
+	uint32_t  minvddc;
+	uint32_t  avfs_meannsigma_acontant0;
+	uint32_t  avfs_meannsigma_acontant1;
+	uint32_t  avfs_meannsigma_acontant2;
+	uint16_t  avfs_meannsigma_dc_tol_sigma;
+	uint16_t  avfs_meannsigma_platform_mean;
+	uint16_t  avfs_meannsigma_platform_sigma;
+	uint32_t  gb_vdroop_table_cksoff_a0;
+	uint32_t  gb_vdroop_table_cksoff_a1;
+	uint32_t  gb_vdroop_table_cksoff_a2;
+	uint32_t  gb_vdroop_table_ckson_a0;
+	uint32_t  gb_vdroop_table_ckson_a1;
+	uint32_t  gb_vdroop_table_ckson_a2;
+	uint32_t  avfsgb_fuse_table_cksoff_m1;
+	uint32_t  avfsgb_fuse_table_cksoff_m2;
+	uint32_t  avfsgb_fuse_table_cksoff_b;
+	uint32_t  avfsgb_fuse_table_ckson_m1;
+	uint32_t  avfsgb_fuse_table_ckson_m2;
+	uint32_t  avfsgb_fuse_table_ckson_b;
+	uint16_t  max_voltage_0_25mv;
+	uint8_t   enable_gb_vdroop_table_cksoff;
+	uint8_t   enable_gb_vdroop_table_ckson;
+	uint8_t   enable_gb_fuse_table_cksoff;
+	uint8_t   enable_gb_fuse_table_ckson;
+	uint16_t  psm_age_comfactor;
+	uint8_t   enable_apply_avfs_cksoff_voltage;
+	uint8_t   reserved;
+	uint32_t  dispclk2gfxclk_a;
+	uint32_t  dispclk2gfxclk_b;
+	uint32_t  dispclk2gfxclk_c;
+	uint32_t  pixclk2gfxclk_a;
+	uint32_t  pixclk2gfxclk_b;
+	uint32_t  pixclk2gfxclk_c;
+	uint32_t  dcefclk2gfxclk_a;
+	uint32_t  dcefclk2gfxclk_b;
+	uint32_t  dcefclk2gfxclk_c;
+	uint32_t  phyclk2gfxclk_a;
+	uint32_t  phyclk2gfxclk_b;
+	uint32_t  phyclk2gfxclk_c;
+	uint32_t  acg_gb_vdroop_table_a0;
+	uint32_t  acg_gb_vdroop_table_a1;
+	uint32_t  acg_gb_vdroop_table_a2;
+	uint32_t  acg_avfsgb_fuse_table_m1;
+	uint32_t  acg_avfsgb_fuse_table_m2;
+	uint32_t  acg_avfsgb_fuse_table_b;
+	uint8_t   enable_acg_gb_vdroop_table;
+	uint8_t   enable_acg_gb_fuse_table;
+	uint32_t  acg_dispclk2gfxclk_a;
+	uint32_t  acg_dispclk2gfxclk_b;
+	uint32_t  acg_dispclk2gfxclk_c;
+	uint32_t  acg_pixclk2gfxclk_a;
+	uint32_t  acg_pixclk2gfxclk_b;
+	uint32_t  acg_pixclk2gfxclk_c;
+	uint32_t  acg_dcefclk2gfxclk_a;
+	uint32_t  acg_dcefclk2gfxclk_b;
+	uint32_t  acg_dcefclk2gfxclk_c;
+	uint32_t  acg_phyclk2gfxclk_a;
+	uint32_t  acg_phyclk2gfxclk_b;
+	uint32_t  acg_phyclk2gfxclk_c;
+};
 
 /* 
   ***************************************************************************

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 #
 # This is a simple Makefile to test some of the RAID-6 code
 # from userspace.
@@ -49,9 +50,6 @@ else
         ifeq ($(HAS_ALTIVEC),yes)
                 OBJS += altivec1.o altivec2.o altivec4.o altivec8.o
         endif
-endif
-ifeq ($(ARCH),tilegx)
-OBJS += tilegx8.o
 endif
 
 .c.o:
@@ -115,15 +113,11 @@ int16.c: int.uc ../unroll.awk
 int32.c: int.uc ../unroll.awk
 	$(AWK) ../unroll.awk -vN=32 < int.uc > $@
 
-tilegx8.c: tilegx.uc ../unroll.awk
-	$(AWK) ../unroll.awk -vN=8 < tilegx.uc > $@
-
 tables.c: mktables
 	./mktables > tables.c
 
 clean:
 	rm -f *.o *.a mktables mktables.c *.uc int*.c altivec*.c neon*.c tables.c raid6test
-	rm -f tilegx*.c
 
 spotless: clean
 	rm -f *~

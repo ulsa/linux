@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /* spk_priv.h
  * review functions for the speakup screen review package.
  * originally written by: Kirk Reiser and Andy Berdan.
@@ -6,16 +7,6 @@
  *
  * Copyright (C) 1998  Kirk Reiser.
  * Copyright (C) 2003  David Borowski.
-
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #ifndef _SPEAKUP_PRIVATE_H
 #define _SPEAKUP_PRIVATE_H
@@ -48,6 +39,8 @@ void spk_stop_serial_interrupt(void);
 int spk_wait_for_xmitr(struct spk_synth *in_synth);
 void spk_serial_release(void);
 void spk_ttyio_release(void);
+void spk_ttyio_register_ldisc(void);
+void spk_ttyio_unregister_ldisc(void);
 
 void synth_buffer_skip_nonlatin1(void);
 u16 synth_buffer_getc(void);

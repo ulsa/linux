@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright IBM Corp. 2001, 2009
  * Author(s):
@@ -305,7 +306,7 @@ static long ctcm_check_irb_error(struct ccw_device *cdev, struct irb *irb)
  *  ch		The channel, the sense code belongs to.
  *  sense	The sense code to inspect.
  */
-static inline void ccw_unit_check(struct channel *ch, __u8 sense)
+static void ccw_unit_check(struct channel *ch, __u8 sense)
 {
 	CTCM_DBF_TEXT_(TRACE, CTC_DBF_DEBUG,
 			"%s(%s): %02x",
@@ -1115,7 +1116,7 @@ static const struct net_device_ops ctcm_mpc_netdev_ops = {
 	.ndo_start_xmit		= ctcmpc_tx,
 };
 
-void static ctcm_dev_setup(struct net_device *dev)
+static void ctcm_dev_setup(struct net_device *dev)
 {
 	dev->type = ARPHRD_SLIP;
 	dev->tx_queue_len = 100;
@@ -1761,6 +1762,7 @@ static struct ccwgroup_driver ctcm_group_driver = {
 		.owner	= THIS_MODULE,
 		.name	= CTC_DRIVER_NAME,
 	},
+	.ccw_driver  = &ctcm_ccw_driver,
 	.setup	     = ctcm_probe_device,
 	.remove      = ctcm_remove_device,
 	.set_online  = ctcm_new_device,

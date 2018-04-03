@@ -42,6 +42,10 @@
 #include <rdma/ib_cache.h>
 #include <rdma/ib_addr.h>
 
+static struct workqueue_struct *gid_cache_wq;
+
+static struct workqueue_struct *gid_cache_wq;
+
 enum gid_op_type {
 	GID_DEL = 0,
 	GID_ADD
@@ -406,15 +410,18 @@ static void enum_all_gids_of_dev_cb(struct ib_device *ib_dev,
 	rtnl_unlock();
 }
 
-/* This function will rescan all of the network devices in the system
- * and add their gids, as needed, to the relevant RoCE devices. */
-int roce_rescan_device(struct ib_device *ib_dev)
+/**
+ * rdma_roce_rescan_device - Rescan all of the network devices in the system
+ * and add their gids, as needed, to the relevant RoCE devices.
+ *
+ * @device:         the rdma device
+ */
+void rdma_roce_rescan_device(struct ib_device *ib_dev)
 {
 	ib_enum_roce_netdev(ib_dev, pass_all_filter, NULL,
 			    enum_all_gids_of_dev_cb, NULL);
-
-	return 0;
 }
+EXPORT_SYMBOL(rdma_roce_rescan_device);
 
 static void callback_for_addr_gid_device_scan(struct ib_device *device,
 					      u8 port,
@@ -560,7 +567,7 @@ static int netdevice_queue_work(struct netdev_event_work_cmd *cmds,
 	}
 	INIT_WORK(&ndev_work->work, netdevice_event_work_handler);
 
-	queue_work(ib_wq, &ndev_work->work);
+	queue_work(gid_cache_wq, &ndev_work->work);
 
 	return NOTIFY_DONE;
 }
@@ -693,7 +700,7 @@ static int addr_event(struct notifier_block *this, unsigned long event,
 	dev_hold(ndev);
 	work->gid_attr.ndev   = ndev;
 
-	queue_work(ib_wq, &work->work);
+	queue_work(gid_cache_wq, &work->work);
 
 	return NOTIFY_DONE;
 }
@@ -740,6 +747,10 @@ static struct notifier_block nb_inet6addr = {
 
 int __init roce_gid_mgmt_init(void)
 {
+	gid_cache_wq = alloc_ordered_workqueue("gid-cache-wq", 0);
+	if (!gid_cache_wq)
+		return -ENOMEM;
+
 	register_inetaddr_notifier(&nb_inetaddr);
 	if (IS_ENABLED(CONFIG_IPV6))
 		register_inet6addr_notifier(&nb_inet6addr);
@@ -764,4 +775,5 @@ void __exit roce_gid_mgmt_cleanup(void)
 	 * ib-core is removed, all physical devices have been removed,
 	 * so no issue with remaining hardware contexts.
 	 */
+	destroy_workqueue(gid_cache_wq);
 }

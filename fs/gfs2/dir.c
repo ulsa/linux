@@ -170,8 +170,7 @@ static int gfs2_dir_write_data(struct gfs2_inode *ip, const char *buf,
 	if (!size)
 		return 0;
 
-	if (gfs2_is_stuffed(ip) &&
-	    offset + size <= sdp->sd_sb.sb_bsize - sizeof(struct gfs2_dinode))
+	if (gfs2_is_stuffed(ip) && offset + size <= gfs2_max_stuffed_size(ip))
 		return gfs2_dir_write_stuffed(ip, buf, (unsigned int)offset,
 					      size);
 
@@ -872,7 +871,6 @@ static struct gfs2_leaf *new_leaf(struct inode *inode, struct buffer_head **pbh,
 	struct buffer_head *bh;
 	struct gfs2_leaf *leaf;
 	struct gfs2_dirent *dent;
-	struct qstr name = { .name = "" };
 	struct timespec tv = current_time(inode);
 
 	error = gfs2_alloc_blocks(ip, &bn, &n, 0, NULL);
@@ -896,7 +894,7 @@ static struct gfs2_leaf *new_leaf(struct inode *inode, struct buffer_head **pbh,
 	leaf->lf_sec = cpu_to_be64(tv.tv_sec);
 	memset(leaf->lf_reserved2, 0, sizeof(leaf->lf_reserved2));
 	dent = (struct gfs2_dirent *)(leaf+1);
-	gfs2_qstr2dirent(&name, bh->b_size - sizeof(struct gfs2_leaf), dent);
+	gfs2_qstr2dirent(&empty_name, bh->b_size - sizeof(struct gfs2_leaf), dent);
 	*pbh = bh;
 	return leaf;
 }
@@ -1514,7 +1512,9 @@ static void gfs2_dir_readahead(struct inode *inode, unsigned hsize, u32 index,
 				continue;
 			}
 			bh->b_end_io = end_buffer_read_sync;
-			submit_bh(REQ_OP_READ, REQ_RAHEAD | REQ_META, bh);
+			submit_bh(REQ_OP_READ,
+				  REQ_RAHEAD | REQ_META | REQ_PRIO,
+				  bh);
 			continue;
 		}
 		brelse(bh);

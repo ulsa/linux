@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __PARISC_UACCESS_H
 #define __PARISC_UACCESS_H
 
@@ -6,7 +7,6 @@
  */
 #include <asm/page.h>
 #include <asm/cache.h>
-#include <asm-generic/uaccess-unaligned.h>
 
 #include <linux/bug.h>
 #include <linux/string.h>

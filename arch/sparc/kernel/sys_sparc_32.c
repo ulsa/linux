@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* linux/arch/sparc/kernel/sys_sparc.c
  *
  * This file contains various random system calls that
@@ -103,8 +104,8 @@ asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,
 {
 	/* Make sure the shift for mmap2 is constant (12), no matter what PAGE_SIZE
 	   we have. */
-	return sys_mmap_pgoff(addr, len, prot, flags, fd,
-			      pgoff >> (PAGE_SHIFT - 12));
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
+			       pgoff >> (PAGE_SHIFT - 12));
 }
 
 asmlinkage long sys_mmap(unsigned long addr, unsigned long len,
@@ -112,7 +113,7 @@ asmlinkage long sys_mmap(unsigned long addr, unsigned long len,
 	unsigned long off)
 {
 	/* no alignment check? */
-	return sys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
 }
 
 long sparc_remap_file_pages(unsigned long start, unsigned long size,

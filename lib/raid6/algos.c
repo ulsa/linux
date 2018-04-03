@@ -75,9 +75,6 @@ const struct raid6_calls * const raid6_algos[] = {
 	&raid6_altivec4,
 	&raid6_altivec8,
 #endif
-#if defined(CONFIG_TILEGX)
-	&raid6_tilegx8,
-#endif
 #if defined(CONFIG_S390)
 	&raid6_s390vx8,
 #endif
@@ -112,6 +109,9 @@ const struct raid6_recov_calls *const raid6_recov_algos[] = {
 #endif
 #ifdef CONFIG_S390
 	&raid6_recov_s390xc,
+#endif
+#if defined(CONFIG_KERNEL_MODE_NEON)
+	&raid6_recov_neon,
 #endif
 	&raid6_recov_intx1,
 	NULL

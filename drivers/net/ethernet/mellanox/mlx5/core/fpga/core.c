@@ -102,7 +102,7 @@ static int mlx5_fpga_device_load_check(struct mlx5_fpga_device *fdev)
 	return 0;
 }
 
-int mlx5_fpga_device_brb(struct mlx5_fpga_device *fdev)
+static int mlx5_fpga_device_brb(struct mlx5_fpga_device *fdev)
 {
 	int err;
 	struct mlx5_core_dev *mdev = fdev->mdev;
@@ -139,8 +139,7 @@ int mlx5_fpga_device_start(struct mlx5_core_dev *mdev)
 	if (err)
 		goto out;
 
-	err = mlx5_fpga_caps(fdev->mdev,
-			     fdev->mdev->caps.hca_cur[MLX5_CAP_FPGA]);
+	err = mlx5_fpga_caps(fdev->mdev);
 	if (err)
 		goto out;
 

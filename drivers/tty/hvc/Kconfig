@@ -4,7 +4,7 @@ config HVC_DRIVER
 	bool
 	help
 	  Generic "hypervisor virtual console" infrastructure for various
-	  hypervisors (pSeries, iSeries, Xen, lguest).
+	  hypervisors (pSeries, iSeries, Xen).
 	  It will automatically be selected if one of the back-end console drivers
 	  is selected.
 
@@ -87,15 +87,6 @@ config HVC_DCC
          This console uses the JTAG DCC on ARM to create a console under the HVC
 	 driver. This console is used through a JTAG only on ARM. If you don't have
 	 a JTAG then you probably don't want this option.
-
-config HVC_BFIN_JTAG
-	bool "Blackfin JTAG console"
-	depends on BLACKFIN
-	select HVC_DRIVER
-	help
-	 This console uses the Blackfin JTAG to create a console under the
-	 the HVC driver.  If you don't have JTAG, then you probably don't
-	 want this option.
 
 config HVCS
 	tristate "IBM Hypervisor Virtual Console Server support"

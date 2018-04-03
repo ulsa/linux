@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Hardware driver for DAQ-STC based boards
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 1997-2001 David A. Schleef <ds@schleef.org>
  * Copyright (C) 2002-2006 Frank Mori Hess <fmhess@users.sourceforge.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -1962,7 +1953,8 @@ static unsigned int ni_timer_to_ns(const struct comedi_device *dev, int timer)
 static void ni_cmd_set_mite_transfer(struct mite_ring *ring,
 				     struct comedi_subdevice *sdev,
 				     const struct comedi_cmd *cmd,
-				     unsigned int max_count) {
+				     unsigned int max_count)
+{
 #ifdef PCIDMA
 	unsigned int nbytes = max_count;
 
@@ -3116,8 +3108,7 @@ static void ni_ao_cmd_set_update(struct comedi_device *dev,
 		/* following line: 2-1 per STC */
 		ni_stc_writel(dev, 1, NISTC_AO_UI_LOADA_REG);
 		ni_stc_writew(dev, NISTC_AO_CMD1_UI_LOAD, NISTC_AO_CMD1_REG);
-		/* following line: N-1 per STC */
-		ni_stc_writel(dev, trigvar - 1, NISTC_AO_UI_LOADA_REG);
+		ni_stc_writel(dev, trigvar, NISTC_AO_UI_LOADA_REG);
 	} else { /* TRIG_EXT */
 		/* FIXME:  assert scan_begin_arg != 0, ret failure otherwise */
 		devpriv->ao_cmd2  |= NISTC_AO_CMD2_BC_GATE_ENA;

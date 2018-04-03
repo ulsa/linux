@@ -1,9 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __PSTORE_INTERNAL_H__
 #define __PSTORE_INTERNAL_H__
 
 #include <linux/types.h>
 #include <linux/time.h>
 #include <linux/pstore.h>
+
+#define PSTORE_DEFAULT_KMSG_BYTES 10240
+extern unsigned long kmsg_bytes;
 
 #ifdef CONFIG_PSTORE_FTRACE
 extern void pstore_register_ftrace(void);

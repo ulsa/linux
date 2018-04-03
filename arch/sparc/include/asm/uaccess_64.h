@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_UACCESS_H
 #define _ASM_UACCESS_H
 
@@ -9,7 +10,6 @@
 #include <linux/string.h>
 #include <asm/asi.h>
 #include <asm/spitfire.h>
-#include <asm-generic/uaccess-unaligned.h>
 #include <asm/extable_64.h>
 
 #include <asm/processor.h>

@@ -52,7 +52,7 @@ module_param(debug, int, 0);
 MODULE_AUTHOR("Kai Germaschewski <kai.germaschewski@gmx.de>/Karsten Keil <kkeil@suse.de>");
 MODULE_DESCRIPTION("AVM Fritz!PCI/PnP ISDN driver");
 
-static struct pci_device_id fcpci_ids[] = {
+static const struct pci_device_id fcpci_ids[] = {
 	{ .vendor      = PCI_VENDOR_ID_AVM,
 	  .device      = PCI_DEVICE_ID_AVM_A1,
 	  .subvendor   = PCI_ANY_ID,
@@ -940,6 +940,8 @@ static int fcpnp_probe(struct pnp_dev *pdev, const struct pnp_device_id *dev_id)
 	}
 	adapter->io = pnp_port_start(pdev, 0);
 	adapter->irq = pnp_irq(pdev, 0);
+	if (!adapter->io || adapter->irq == -1)
+		goto err_free;
 
 	printk(KERN_INFO "hisax_fcpcipnp: found adapter %s at IO %#x irq %d\n",
 	       (char *) dev_id->driver_data, adapter->io, adapter->irq);

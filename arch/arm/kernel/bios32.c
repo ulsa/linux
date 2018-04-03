@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/arm/kernel/bios32.c
  *
@@ -480,7 +481,7 @@ static void pcibios_init_hw(struct device *parent, struct hw_pci *hw,
 
 			ret = pcibios_init_resource(nr, sys, hw->io_optional);
 			if (ret)  {
-				kfree(sys);
+				pci_free_host_bridge(bridge);
 				break;
 			}
 
@@ -526,7 +527,7 @@ void pci_common_init_dev(struct device *parent, struct hw_pci *hw)
 	struct pci_sys_data *sys;
 	LIST_HEAD(head);
 
-	pci_add_flags(PCI_REASSIGN_ALL_RSRC);
+	pci_add_flags(PCI_REASSIGN_ALL_BUS);
 	if (hw->preinit)
 		hw->preinit();
 	pcibios_init_hw(parent, hw, &head);

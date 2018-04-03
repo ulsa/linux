@@ -112,6 +112,9 @@ static int compat_drm_version(struct file *file, unsigned int cmd,
 	v32.version_major = v.version_major;
 	v32.version_minor = v.version_minor;
 	v32.version_patchlevel = v.version_patchlevel;
+	v32.name_len = v.name_len;
+	v32.date_len = v.date_len;
+	v32.desc_len = v.desc_len;
 	if (copy_to_user((void __user *)arg, &v32, sizeof(v32)))
 		return -EFAULT;
 	return 0;
@@ -839,7 +842,7 @@ static int compat_drm_wait_vblank(struct file *file, unsigned int cmd,
 	req.request.type = req32.request.type;
 	req.request.sequence = req32.request.sequence;
 	req.request.signal = req32.request.signal;
-	err = drm_ioctl_kernel(file, drm_wait_vblank, &req, DRM_UNLOCKED);
+	err = drm_ioctl_kernel(file, drm_wait_vblank_ioctl, &req, DRM_UNLOCKED);
 	if (err)
 		return err;
 

@@ -418,11 +418,19 @@ ceph_parse_options(char *options, const char *dev_name,
 				opt->flags |= CEPH_OPT_FSID;
 			break;
 		case Opt_name:
+			kfree(opt->name);
 			opt->name = kstrndup(argstr[0].from,
 					      argstr[0].to-argstr[0].from,
 					      GFP_KERNEL);
+			if (!opt->name) {
+				err = -ENOMEM;
+				goto out;
+			}
 			break;
 		case Opt_secret:
+			ceph_crypto_key_destroy(opt->key);
+			kfree(opt->key);
+
 		        opt->key = kzalloc(sizeof(*opt->key), GFP_KERNEL);
 			if (!opt->key) {
 				err = -ENOMEM;
@@ -433,6 +441,9 @@ ceph_parse_options(char *options, const char *dev_name,
 				goto out;
 			break;
 		case Opt_key:
+			ceph_crypto_key_destroy(opt->key);
+			kfree(opt->key);
+
 		        opt->key = kzalloc(sizeof(*opt->key), GFP_KERNEL);
 			if (!opt->key) {
 				err = -ENOMEM;
@@ -599,7 +610,11 @@ struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private)
 {
 	struct ceph_client *client;
 	struct ceph_entity_addr *myaddr = NULL;
-	int err = -ENOMEM;
+	int err;
+
+	err = wait_for_random_bytes();
+	if (err < 0)
+		return ERR_PTR(err);
 
 	client = kzalloc(sizeof(*client), GFP_KERNEL);
 	if (client == NULL)

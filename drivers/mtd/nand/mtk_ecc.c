@@ -28,58 +28,40 @@
 
 #define ECC_IDLE_MASK		BIT(0)
 #define ECC_IRQ_EN		BIT(0)
+#define ECC_PG_IRQ_SEL		BIT(1)
 #define ECC_OP_ENABLE		(1)
 #define ECC_OP_DISABLE		(0)
 
 #define ECC_ENCCON		(0x00)
 #define ECC_ENCCNFG		(0x04)
-#define		ECC_CNFG_4BIT		(0)
-#define		ECC_CNFG_6BIT		(1)
-#define		ECC_CNFG_8BIT		(2)
-#define		ECC_CNFG_10BIT		(3)
-#define		ECC_CNFG_12BIT		(4)
-#define		ECC_CNFG_14BIT		(5)
-#define		ECC_CNFG_16BIT		(6)
-#define		ECC_CNFG_18BIT		(7)
-#define		ECC_CNFG_20BIT		(8)
-#define		ECC_CNFG_22BIT		(9)
-#define		ECC_CNFG_24BIT		(0xa)
-#define		ECC_CNFG_28BIT		(0xb)
-#define		ECC_CNFG_32BIT		(0xc)
-#define		ECC_CNFG_36BIT		(0xd)
-#define		ECC_CNFG_40BIT		(0xe)
-#define		ECC_CNFG_44BIT		(0xf)
-#define		ECC_CNFG_48BIT		(0x10)
-#define		ECC_CNFG_52BIT		(0x11)
-#define		ECC_CNFG_56BIT		(0x12)
-#define		ECC_CNFG_60BIT		(0x13)
-#define		ECC_MODE_SHIFT		(5)
 #define		ECC_MS_SHIFT		(16)
 #define ECC_ENCDIADDR		(0x08)
 #define ECC_ENCIDLE		(0x0C)
-#define ECC_ENCPAR(x)		(0x10 + (x) * sizeof(u32))
-#define ECC_ENCIRQ_EN		(0x80)
-#define ECC_ENCIRQ_STA		(0x84)
 #define ECC_DECCON		(0x100)
 #define ECC_DECCNFG		(0x104)
 #define		DEC_EMPTY_EN		BIT(31)
 #define		DEC_CNFG_CORRECT	(0x3 << 12)
 #define ECC_DECIDLE		(0x10C)
 #define ECC_DECENUM0		(0x114)
-#define		ERR_MASK		(0x3f)
-#define ECC_DECDONE		(0x124)
-#define ECC_DECIRQ_EN		(0x200)
-#define ECC_DECIRQ_STA		(0x204)
 
 #define ECC_TIMEOUT		(500000)
 
 #define ECC_IDLE_REG(op)	((op) == ECC_ENCODE ? ECC_ENCIDLE : ECC_DECIDLE)
 #define ECC_CTL_REG(op)		((op) == ECC_ENCODE ? ECC_ENCCON : ECC_DECCON)
-#define ECC_IRQ_REG(op)		((op) == ECC_ENCODE ? \
-					ECC_ENCIRQ_EN : ECC_DECIRQ_EN)
+
+struct mtk_ecc_caps {
+	u32 err_mask;
+	const u8 *ecc_strength;
+	const u32 *ecc_regs;
+	u8 num_ecc_strength;
+	u8 ecc_mode_shift;
+	u32 parity_bits;
+	int pg_irq_sel;
+};
 
 struct mtk_ecc {
 	struct device *dev;
+	const struct mtk_ecc_caps *caps;
 	void __iomem *regs;
 	struct clk *clk;
 
@@ -87,7 +69,58 @@ struct mtk_ecc {
 	struct mutex lock;
 	u32 sectors;
 
-	u8 eccdata[112];
+	u8 *eccdata;
+};
+
+/* ecc strength that each IP supports */
+static const u8 ecc_strength_mt2701[] = {
+	4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36,
+	40, 44, 48, 52, 56, 60
+};
+
+static const u8 ecc_strength_mt2712[] = {
+	4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36,
+	40, 44, 48, 52, 56, 60, 68, 72, 80
+};
+
+static const u8 ecc_strength_mt7622[] = {
+	4, 6, 8, 10, 12, 14, 16
+};
+
+enum mtk_ecc_regs {
+	ECC_ENCPAR00,
+	ECC_ENCIRQ_EN,
+	ECC_ENCIRQ_STA,
+	ECC_DECDONE,
+	ECC_DECIRQ_EN,
+	ECC_DECIRQ_STA,
+};
+
+static int mt2701_ecc_regs[] = {
+	[ECC_ENCPAR00] =        0x10,
+	[ECC_ENCIRQ_EN] =       0x80,
+	[ECC_ENCIRQ_STA] =      0x84,
+	[ECC_DECDONE] =         0x124,
+	[ECC_DECIRQ_EN] =       0x200,
+	[ECC_DECIRQ_STA] =      0x204,
+};
+
+static int mt2712_ecc_regs[] = {
+	[ECC_ENCPAR00] =        0x300,
+	[ECC_ENCIRQ_EN] =       0x80,
+	[ECC_ENCIRQ_STA] =      0x84,
+	[ECC_DECDONE] =         0x124,
+	[ECC_DECIRQ_EN] =       0x200,
+	[ECC_DECIRQ_STA] =      0x204,
+};
+
+static int mt7622_ecc_regs[] = {
+	[ECC_ENCPAR00] =        0x10,
+	[ECC_ENCIRQ_EN] =       0x30,
+	[ECC_ENCIRQ_STA] =      0x34,
+	[ECC_DECDONE] =         0x11c,
+	[ECC_DECIRQ_EN] =       0x140,
+	[ECC_DECIRQ_STA] =      0x144,
 };
 
 static inline void mtk_ecc_wait_idle(struct mtk_ecc *ecc,
@@ -108,110 +141,58 @@ static inline void mtk_ecc_wait_idle(struct mtk_ecc *ecc,
 static irqreturn_t mtk_ecc_irq(int irq, void *id)
 {
 	struct mtk_ecc *ecc = id;
-	enum mtk_ecc_operation op;
 	u32 dec, enc;
 
-	dec = readw(ecc->regs + ECC_DECIRQ_STA) & ECC_IRQ_EN;
+	dec = readw(ecc->regs + ecc->caps->ecc_regs[ECC_DECIRQ_STA])
+		    & ECC_IRQ_EN;
 	if (dec) {
-		op = ECC_DECODE;
-		dec = readw(ecc->regs + ECC_DECDONE);
+		dec = readw(ecc->regs + ecc->caps->ecc_regs[ECC_DECDONE]);
 		if (dec & ecc->sectors) {
+			/*
+			 * Clear decode IRQ status once again to ensure that
+			 * there will be no extra IRQ.
+			 */
+			readw(ecc->regs + ecc->caps->ecc_regs[ECC_DECIRQ_STA]);
 			ecc->sectors = 0;
 			complete(&ecc->done);
 		} else {
 			return IRQ_HANDLED;
 		}
 	} else {
-		enc = readl(ecc->regs + ECC_ENCIRQ_STA) & ECC_IRQ_EN;
-		if (enc) {
-			op = ECC_ENCODE;
+		enc = readl(ecc->regs + ecc->caps->ecc_regs[ECC_ENCIRQ_STA])
+		      & ECC_IRQ_EN;
+		if (enc)
 			complete(&ecc->done);
-		} else {
+		else
 			return IRQ_NONE;
-		}
 	}
-
-	writel(0, ecc->regs + ECC_IRQ_REG(op));
 
 	return IRQ_HANDLED;
 }
 
-static void mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
+static int mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 {
-	u32 ecc_bit = ECC_CNFG_4BIT, dec_sz, enc_sz;
-	u32 reg;
+	u32 ecc_bit, dec_sz, enc_sz;
+	u32 reg, i;
 
-	switch (config->strength) {
-	case 4:
-		ecc_bit = ECC_CNFG_4BIT;
-		break;
-	case 6:
-		ecc_bit = ECC_CNFG_6BIT;
-		break;
-	case 8:
-		ecc_bit = ECC_CNFG_8BIT;
-		break;
-	case 10:
-		ecc_bit = ECC_CNFG_10BIT;
-		break;
-	case 12:
-		ecc_bit = ECC_CNFG_12BIT;
-		break;
-	case 14:
-		ecc_bit = ECC_CNFG_14BIT;
-		break;
-	case 16:
-		ecc_bit = ECC_CNFG_16BIT;
-		break;
-	case 18:
-		ecc_bit = ECC_CNFG_18BIT;
-		break;
-	case 20:
-		ecc_bit = ECC_CNFG_20BIT;
-		break;
-	case 22:
-		ecc_bit = ECC_CNFG_22BIT;
-		break;
-	case 24:
-		ecc_bit = ECC_CNFG_24BIT;
-		break;
-	case 28:
-		ecc_bit = ECC_CNFG_28BIT;
-		break;
-	case 32:
-		ecc_bit = ECC_CNFG_32BIT;
-		break;
-	case 36:
-		ecc_bit = ECC_CNFG_36BIT;
-		break;
-	case 40:
-		ecc_bit = ECC_CNFG_40BIT;
-		break;
-	case 44:
-		ecc_bit = ECC_CNFG_44BIT;
-		break;
-	case 48:
-		ecc_bit = ECC_CNFG_48BIT;
-		break;
-	case 52:
-		ecc_bit = ECC_CNFG_52BIT;
-		break;
-	case 56:
-		ecc_bit = ECC_CNFG_56BIT;
-		break;
-	case 60:
-		ecc_bit = ECC_CNFG_60BIT;
-		break;
-	default:
-		dev_err(ecc->dev, "invalid strength %d, default to 4 bits\n",
-			config->strength);
+	for (i = 0; i < ecc->caps->num_ecc_strength; i++) {
+		if (ecc->caps->ecc_strength[i] == config->strength)
+			break;
 	}
+
+	if (i == ecc->caps->num_ecc_strength) {
+		dev_err(ecc->dev, "invalid ecc strength %d\n",
+			config->strength);
+		return -EINVAL;
+	}
+
+	ecc_bit = i;
 
 	if (config->op == ECC_ENCODE) {
 		/* configure ECC encoder (in bits) */
 		enc_sz = config->len << 3;
 
-		reg = ecc_bit | (config->mode << ECC_MODE_SHIFT);
+		reg = ecc_bit | (config->mode << ecc->caps->ecc_mode_shift);
 		reg |= (enc_sz << ECC_MS_SHIFT);
 		writel(reg, ecc->regs + ECC_ENCCNFG);
 
@@ -222,9 +203,9 @@ static void mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 	} else {
 		/* configure ECC decoder (in bits) */
 		dec_sz = (config->len << 3) +
-					config->strength * ECC_PARITY_BITS;
+			 config->strength * ecc->caps->parity_bits;
 
-		reg = ecc_bit | (config->mode << ECC_MODE_SHIFT);
+		reg = ecc_bit | (config->mode << ecc->caps->ecc_mode_shift);
 		reg |= (dec_sz << ECC_MS_SHIFT) | DEC_CNFG_CORRECT;
 		reg |= DEC_EMPTY_EN;
 		writel(reg, ecc->regs + ECC_DECCNFG);
@@ -232,6 +213,8 @@ static void mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 		if (config->sectors)
 			ecc->sectors = 1 << (config->sectors - 1);
 	}
+
+	return 0;
 }
 
 void mtk_ecc_get_stats(struct mtk_ecc *ecc, struct mtk_ecc_stats *stats,
@@ -247,8 +230,8 @@ void mtk_ecc_get_stats(struct mtk_ecc *ecc, struct mtk_ecc_stats *stats,
 		offset = (i >> 2) << 2;
 		err = readl(ecc->regs + ECC_DECENUM0 + offset);
 		err = err >> ((i % 4) * 8);
-		err &= ERR_MASK;
-		if (err == ERR_MASK) {
+		err &= ecc->caps->err_mask;
+		if (err == ecc->caps->err_mask) {
 			/* uncorrectable errors */
 			stats->failed++;
 			continue;
@@ -313,6 +296,7 @@ EXPORT_SYMBOL(of_mtk_ecc_get);
 int mtk_ecc_enable(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 {
 	enum mtk_ecc_operation op = config->op;
+	u16 reg_val;
 	int ret;
 
 	ret = mutex_lock_interruptible(&ecc->lock);
@@ -322,11 +306,32 @@ int mtk_ecc_enable(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 	}
 
 	mtk_ecc_wait_idle(ecc, op);
-	mtk_ecc_config(ecc, config);
-	writew(ECC_OP_ENABLE, ecc->regs + ECC_CTL_REG(op));
 
-	init_completion(&ecc->done);
-	writew(ECC_IRQ_EN, ecc->regs + ECC_IRQ_REG(op));
+	ret = mtk_ecc_config(ecc, config);
+	if (ret) {
+		mutex_unlock(&ecc->lock);
+		return ret;
+	}
+
+	if (config->mode != ECC_NFI_MODE || op != ECC_ENCODE) {
+		init_completion(&ecc->done);
+		reg_val = ECC_IRQ_EN;
+		/*
+		 * For ECC_NFI_MODE, if ecc->caps->pg_irq_sel is 1, then it
+		 * means this chip can only generate one ecc irq during page
+		 * read / write. If is 0, generate one ecc irq each ecc step.
+		 */
+		if (ecc->caps->pg_irq_sel && config->mode == ECC_NFI_MODE)
+			reg_val |= ECC_PG_IRQ_SEL;
+		if (op == ECC_ENCODE)
+			writew(reg_val, ecc->regs +
+			       ecc->caps->ecc_regs[ECC_ENCIRQ_EN]);
+		else
+			writew(reg_val, ecc->regs +
+			       ecc->caps->ecc_regs[ECC_DECIRQ_EN]);
+	}
+
+	writew(ECC_OP_ENABLE, ecc->regs + ECC_CTL_REG(op));
 
 	return 0;
 }
@@ -342,7 +347,17 @@ void mtk_ecc_disable(struct mtk_ecc *ecc)
 
 	/* disable it */
 	mtk_ecc_wait_idle(ecc, op);
-	writew(0, ecc->regs + ECC_IRQ_REG(op));
+	if (op == ECC_DECODE) {
+		/*
+		 * Clear decode IRQ status in case there is a timeout to wait
+		 * decode IRQ.
+		 */
+		readw(ecc->regs + ecc->caps->ecc_regs[ECC_DECDONE]);
+		writew(0, ecc->regs + ecc->caps->ecc_regs[ECC_DECIRQ_EN]);
+	} else {
+		writew(0, ecc->regs + ecc->caps->ecc_regs[ECC_ENCIRQ_EN]);
+	}
+
 	writew(ECC_OP_DISABLE, ecc->regs + ECC_CTL_REG(op));
 
 	mutex_unlock(&ecc->lock);
@@ -393,10 +408,12 @@ int mtk_ecc_encode(struct mtk_ecc *ecc, struct mtk_ecc_config *config,
 	mtk_ecc_wait_idle(ecc, ECC_ENCODE);
 
 	/* Program ECC bytes to OOB: per sector oob = FDM + ECC + SPARE */
-	len = (config->strength * ECC_PARITY_BITS + 7) >> 3;
+	len = (config->strength * ecc->caps->parity_bits + 7) >> 3;
 
 	/* write the parity bytes generated by the ECC back to temp buffer */
-	__ioread32_copy(ecc->eccdata, ecc->regs + ECC_ENCPAR(0), round_up(len, 4));
+	__ioread32_copy(ecc->eccdata,
+			ecc->regs + ecc->caps->ecc_regs[ECC_ENCPAR00],
+			round_up(len, 4));
 
 	/* copy into possibly unaligned OOB region with actual length */
 	memcpy(data + bytes, ecc->eccdata, len);
@@ -409,35 +426,100 @@ timeout:
 }
 EXPORT_SYMBOL(mtk_ecc_encode);
 
-void mtk_ecc_adjust_strength(u32 *p)
+void mtk_ecc_adjust_strength(struct mtk_ecc *ecc, u32 *p)
 {
-	u32 ecc[] = {4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36,
-			40, 44, 48, 52, 56, 60};
+	const u8 *ecc_strength = ecc->caps->ecc_strength;
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(ecc); i++) {
-		if (*p <= ecc[i]) {
+	for (i = 0; i < ecc->caps->num_ecc_strength; i++) {
+		if (*p <= ecc_strength[i]) {
 			if (!i)
-				*p = ecc[i];
-			else if (*p != ecc[i])
-				*p = ecc[i - 1];
+				*p = ecc_strength[i];
+			else if (*p != ecc_strength[i])
+				*p = ecc_strength[i - 1];
 			return;
 		}
 	}
 
-	*p = ecc[ARRAY_SIZE(ecc) - 1];
+	*p = ecc_strength[ecc->caps->num_ecc_strength - 1];
 }
 EXPORT_SYMBOL(mtk_ecc_adjust_strength);
+
+unsigned int mtk_ecc_get_parity_bits(struct mtk_ecc *ecc)
+{
+	return ecc->caps->parity_bits;
+}
+EXPORT_SYMBOL(mtk_ecc_get_parity_bits);
+
+static const struct mtk_ecc_caps mtk_ecc_caps_mt2701 = {
+	.err_mask = 0x3f,
+	.ecc_strength = ecc_strength_mt2701,
+	.ecc_regs = mt2701_ecc_regs,
+	.num_ecc_strength = 20,
+	.ecc_mode_shift = 5,
+	.parity_bits = 14,
+	.pg_irq_sel = 0,
+};
+
+static const struct mtk_ecc_caps mtk_ecc_caps_mt2712 = {
+	.err_mask = 0x7f,
+	.ecc_strength = ecc_strength_mt2712,
+	.ecc_regs = mt2712_ecc_regs,
+	.num_ecc_strength = 23,
+	.ecc_mode_shift = 5,
+	.parity_bits = 14,
+	.pg_irq_sel = 1,
+};
+
+static const struct mtk_ecc_caps mtk_ecc_caps_mt7622 = {
+	.err_mask = 0x3f,
+	.ecc_strength = ecc_strength_mt7622,
+	.ecc_regs = mt7622_ecc_regs,
+	.num_ecc_strength = 7,
+	.ecc_mode_shift = 4,
+	.parity_bits = 13,
+	.pg_irq_sel = 0,
+};
+
+static const struct of_device_id mtk_ecc_dt_match[] = {
+	{
+		.compatible = "mediatek,mt2701-ecc",
+		.data = &mtk_ecc_caps_mt2701,
+	}, {
+		.compatible = "mediatek,mt2712-ecc",
+		.data = &mtk_ecc_caps_mt2712,
+	}, {
+		.compatible = "mediatek,mt7622-ecc",
+		.data = &mtk_ecc_caps_mt7622,
+	},
+	{},
+};
 
 static int mtk_ecc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct mtk_ecc *ecc;
 	struct resource *res;
+	const struct of_device_id *of_ecc_id = NULL;
+	u32 max_eccdata_size;
 	int irq, ret;
 
 	ecc = devm_kzalloc(dev, sizeof(*ecc), GFP_KERNEL);
 	if (!ecc)
+		return -ENOMEM;
+
+	of_ecc_id = of_match_device(mtk_ecc_dt_match, &pdev->dev);
+	if (!of_ecc_id)
+		return -ENODEV;
+
+	ecc->caps = of_ecc_id->data;
+
+	max_eccdata_size = ecc->caps->num_ecc_strength - 1;
+	max_eccdata_size = ecc->caps->ecc_strength[max_eccdata_size];
+	max_eccdata_size = (max_eccdata_size * ecc->caps->parity_bits + 7) >> 3;
+	max_eccdata_size = round_up(max_eccdata_size, 4);
+	ecc->eccdata = devm_kzalloc(dev, max_eccdata_size, GFP_KERNEL);
+	if (!ecc->eccdata)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -455,8 +537,8 @@ static int mtk_ecc_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		dev_err(dev, "failed to get irq\n");
-		return -EINVAL;
+		dev_err(dev, "failed to get irq: %d\n", irq);
+		return irq;
 	}
 
 	ret = dma_set_mask(dev, DMA_BIT_MASK(32));
@@ -500,18 +582,11 @@ static int mtk_ecc_resume(struct device *dev)
 		return ret;
 	}
 
-	mtk_ecc_hw_init(ecc);
-
 	return 0;
 }
 
 static SIMPLE_DEV_PM_OPS(mtk_ecc_pm_ops, mtk_ecc_suspend, mtk_ecc_resume);
 #endif
-
-static const struct of_device_id mtk_ecc_dt_match[] = {
-	{ .compatible = "mediatek,mt2701-ecc" },
-	{},
-};
 
 MODULE_DEVICE_TABLE(of, mtk_ecc_dt_match);
 

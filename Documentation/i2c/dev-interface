@@ -17,13 +17,16 @@ i2c-10, ...). All 256 minor device numbers are reserved for i2c.
 C example
 =========
 
-So let's say you want to access an i2c adapter from a C program. The
-first thing to do is "#include <linux/i2c-dev.h>". Please note that
-there are two files named "i2c-dev.h" out there, one is distributed
-with the Linux kernel and is meant to be included from kernel
-driver code, the other one is distributed with i2c-tools and is
-meant to be included from user-space programs. You obviously want
-the second one here.
+So let's say you want to access an i2c adapter from a C program.
+First, you need to include these two headers:
+
+  #include <linux/i2c-dev.h>
+  #include <i2c/smbus.h>
+
+(Please note that there are two files named "i2c-dev.h" out there. One is
+distributed with the Linux kernel and the other one is included in the
+source tree of i2c-tools. They used to be different in content but since 2012
+they're identical. You should use "linux/i2c-dev.h").
 
 Now, you have to decide which adapter you want to access. You should
 inspect /sys/class/i2c-dev/ or run "i2cdetect -l" to decide this.
@@ -191,7 +194,7 @@ checking on future transactions.)
 4* Other ioctl() calls are converted to in-kernel function calls by
 i2c-dev. Examples include I2C_FUNCS, which queries the I2C adapter
 functionality using i2c.h:i2c_get_functionality(), and I2C_SMBUS, which
-performs an SMBus transaction using i2c-core.c:i2c_smbus_xfer().
+performs an SMBus transaction using i2c-core-smbus.c:i2c_smbus_xfer().
 
 The i2c-dev driver is responsible for checking all the parameters that
 come from user-space for validity. After this point, there is no
@@ -200,13 +203,13 @@ and calls that would have been performed by kernel I2C chip drivers
 directly. This means that I2C bus drivers don't need to implement
 anything special to support access from user-space.
 
-5* These i2c-core.c/i2c.h functions are wrappers to the actual
-implementation of your I2C bus driver. Each adapter must declare
-callback functions implementing these standard calls.
-i2c.h:i2c_get_functionality() calls i2c_adapter.algo->functionality(),
-while i2c-core.c:i2c_smbus_xfer() calls either
+5* These i2c.h functions are wrappers to the actual implementation of
+your I2C bus driver. Each adapter must declare callback functions
+implementing these standard calls. i2c.h:i2c_get_functionality() calls
+i2c_adapter.algo->functionality(), while
+i2c-core-smbus.c:i2c_smbus_xfer() calls either
 adapter.algo->smbus_xfer() if it is implemented, or if not,
-i2c-core.c:i2c_smbus_xfer_emulated() which in turn calls
+i2c-core-smbus.c:i2c_smbus_xfer_emulated() which in turn calls
 i2c_adapter.algo->master_xfer().
 
 After your I2C bus driver has processed these requests, execution runs

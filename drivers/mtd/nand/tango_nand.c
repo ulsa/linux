@@ -11,7 +11,7 @@
 #include <linux/clk.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
-#include <linux/mtd/nand.h>
+#include <linux/mtd/rawnand.h>
 #include <linux/dmaengine.h>
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
@@ -303,7 +303,7 @@ static int tango_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 			    const u8 *buf, int oob_required, int page)
 {
 	struct tango_nfc *nfc = to_tango_nfc(chip->controller);
-	int err, len = mtd->writesize;
+	int err, status, len = mtd->writesize;
 
 	/* Calling tango_write_oob() would send PAGEPROG twice */
 	if (oob_required)
@@ -313,6 +313,10 @@ static int tango_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	err = do_dma(nfc, DMA_TO_DEVICE, NFC_WRITE, buf, len, page);
 	if (err)
 		return err;
+
+	status = chip->waitfunc(mtd, chip);
+	if (status & NAND_STATUS_FAIL)
+		return -EIO;
 
 	return 0;
 }
@@ -325,7 +329,7 @@ static void aux_read(struct nand_chip *chip, u8 **buf, int len, int *pos)
 
 	if (!*buf) {
 		/* skip over "len" bytes */
-		chip->cmdfunc(mtd, NAND_CMD_RNDOUT, *pos, -1);
+		nand_change_read_column_op(chip, *pos, NULL, 0, false);
 	} else {
 		tango_read_buf(mtd, *buf, len);
 		*buf += len;
@@ -340,7 +344,7 @@ static void aux_write(struct nand_chip *chip, const u8 **buf, int len, int *pos)
 
 	if (!*buf) {
 		/* skip over "len" bytes */
-		chip->cmdfunc(mtd, NAND_CMD_SEQIN, *pos, -1);
+		nand_change_write_column_op(chip, *pos, NULL, 0, false);
 	} else {
 		tango_write_buf(mtd, *buf, len);
 		*buf += len;
@@ -423,7 +427,7 @@ static void raw_write(struct nand_chip *chip, const u8 *buf, const u8 *oob)
 static int tango_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 			       u8 *buf, int oob_required, int page)
 {
-	chip->cmdfunc(mtd, NAND_CMD_READ0, 0, page);
+	nand_read_page_op(chip, page, 0, NULL, 0);
 	raw_read(chip, buf, chip->oob_poi);
 	return 0;
 }
@@ -431,16 +435,15 @@ static int tango_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 static int tango_write_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 				const u8 *buf, int oob_required, int page)
 {
-	chip->cmdfunc(mtd, NAND_CMD_SEQIN, 0, page);
+	nand_prog_page_begin_op(chip, page, 0, NULL, 0);
 	raw_write(chip, buf, chip->oob_poi);
-	chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
-	return 0;
+	return nand_prog_page_end_op(chip);
 }
 
 static int tango_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
 			  int page)
 {
-	chip->cmdfunc(mtd, NAND_CMD_READ0, 0, page);
+	nand_read_page_op(chip, page, 0, NULL, 0);
 	raw_read(chip, NULL, chip->oob_poi);
 	return 0;
 }
@@ -448,11 +451,9 @@ static int tango_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
 static int tango_write_oob(struct mtd_info *mtd, struct nand_chip *chip,
 			   int page)
 {
-	chip->cmdfunc(mtd, NAND_CMD_SEQIN, 0, page);
+	nand_prog_page_begin_op(chip, page, 0, NULL, 0);
 	raw_write(chip, NULL, chip->oob_poi);
-	chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
-	chip->waitfunc(mtd, chip);
-	return 0;
+	return nand_prog_page_end_op(chip);
 }
 
 static int oob_ecc(struct mtd_info *mtd, int idx, struct mtd_oob_region *res)
@@ -484,9 +485,8 @@ static u32 to_ticks(int kHz, int ps)
 	return DIV_ROUND_UP_ULL((u64)kHz * ps, NSEC_PER_SEC);
 }
 
-static int tango_set_timings(struct mtd_info *mtd,
-			     const struct nand_data_interface *conf,
-			     bool check_only)
+static int tango_set_timings(struct mtd_info *mtd, int csline,
+			     const struct nand_data_interface *conf)
 {
 	const struct nand_sdr_timings *sdr = nand_get_sdr_timings(conf);
 	struct nand_chip *chip = mtd_to_nand(mtd);
@@ -498,7 +498,7 @@ static int tango_set_timings(struct mtd_info *mtd,
 	if (IS_ERR(sdr))
 		return PTR_ERR(sdr);
 
-	if (check_only)
+	if (csline == NAND_DATA_IFACE_CHECK_ONLY)
 		return 0;
 
 	Trdy = to_ticks(kHz, sdr->tCEA_max - sdr->tREA_max);
@@ -580,7 +580,6 @@ static int chip_init(struct device *dev, struct device_node *np)
 	ecc->write_page = tango_write_page;
 	ecc->read_oob = tango_read_oob;
 	ecc->write_oob = tango_write_oob;
-	ecc->options = NAND_ECC_CUSTOM_PAGE_ACCESS;
 
 	err = nand_scan_tail(mtd);
 	if (err)
