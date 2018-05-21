@@ -747,7 +747,7 @@ int finish_mkwrite_fault(struct vm_fault *vmf);
  * refcount. The each user mapping also has a reference to the page.
  *
  * The pagecache pages are stored in a per-mapping radix tree, which is
- * rooted at mapping->page_tree, and indexed by offset.
+ * rooted at mapping->i_pages, and indexed by offset.
  * Where 2.4 and early 2.6 kernels kept dirty/clean pages in per-address_space
  * lists, we instead now tag pages as dirty/writeback in the radix tree.
  *
@@ -1466,6 +1466,7 @@ extern int try_to_release_page(struct page * page, gfp_t gfp_mask);
 extern void do_invalidatepage(struct page *page, unsigned int offset,
 			      unsigned int length);
 
+void __set_page_dirty(struct page *, struct address_space *, int warn);
 int __set_page_dirty_nobuffers(struct page *page);
 int __set_page_dirty_no_writeback(struct page *page);
 int redirty_page_for_writepage(struct writeback_control *wbc,
@@ -2108,6 +2109,7 @@ extern void setup_per_cpu_pageset(void);
 
 extern void zone_pcp_update(struct zone *zone);
 extern void zone_pcp_reset(struct zone *zone);
+extern void setup_zone_pageset(struct zone *zone);
 
 /* page_alloc.c */
 extern int min_free_kbytes;
@@ -2464,6 +2466,13 @@ static inline vm_fault_t vmf_insert_pfn(struct vm_area_struct *vma,
 	return VM_FAULT_NOPAGE;
 }
 
+static inline vm_fault_t vmf_error(int err)
+{
+	if (err == -ENOMEM)
+		return VM_FAULT_OOM;
+	return VM_FAULT_SIGBUS;
+}
+
 struct page *follow_page_mask(struct vm_area_struct *vma,
 			      unsigned long address, unsigned int foll_flags,
 			      unsigned int *page_mask);
@@ -2491,6 +2500,7 @@ static inline struct page *follow_page(struct vm_area_struct *vma,
 #define FOLL_MLOCK	0x1000	/* lock present pages */
 #define FOLL_REMOTE	0x2000	/* we are working on non-current tsk/mm */
 #define FOLL_COW	0x4000	/* internal GUP flag */
+#define FOLL_ANON	0x8000	/* don't do file mappings */
 
 static inline int vm_fault_to_errno(int vm_fault, int foll_flags)
 {
